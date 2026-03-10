@@ -29,7 +29,7 @@ export function DashboardClient({ username, initialPasscodeSet }: DashboardClien
   const [loading, setLoading] = useState<'send' | 'receive' | null>(null)
   const [status, setStatus] = useState<Status>(null)
   const router = useRouter()
-  
+
   // Passcode setup modal state
   const [showPasscodeSetup, setShowPasscodeSetup] = useState(false)
   const [newPasscode, setNewPasscode] = useState('')
@@ -38,7 +38,7 @@ export function DashboardClient({ username, initialPasscodeSet }: DashboardClien
   const [setupError, setSetupError] = useState('')
   const [passcodeSet, setPasscodeSet] = useState(initialPasscodeSet)
   const [initialCheckDone, setInitialCheckDone] = useState(false)
-  
+
   // Local plain passcode storage state
   const [hasLocalPlainPasscode, setHasLocalPlainPasscode] = useState(false)
   const [showPasscodeInput, setShowPasscodeInput] = useState(false) // Only show when decryption fails
@@ -48,14 +48,14 @@ export function DashboardClient({ username, initialPasscodeSet }: DashboardClien
     const checkPasscode = async () => {
       // Check local hash first
       const localHash = localStorage.getItem(LOCAL_PASSCODE_HASH_KEY)
-      
+
       if (localHash) {
         // Local hash exists, passcode is set
         setPasscodeSet(true)
         setInitialCheckDone(true)
         return
       }
-      
+
       // No local hash - check Upstash
       if (initialPasscodeSet) {
         // Passcode exists on Upstash but not locally - fetch and store it
@@ -67,12 +67,12 @@ export function DashboardClient({ username, initialPasscodeSet }: DashboardClien
         setInitialCheckDone(true)
         return
       }
-      
+
       // No passcode set anywhere - prompt to create one
       setShowPasscodeSetup(true)
       setInitialCheckDone(true)
     }
-    
+
     checkPasscode()
   }, [initialPasscodeSet])
 
@@ -99,13 +99,24 @@ export function DashboardClient({ username, initialPasscodeSet }: DashboardClien
   }, [status])
 
   const handleSend = async () => {
-    if (!content.trim()) {
-      setStatus({ type: 'error', message: 'Nothing to send' })
-      return
+    let textToSend = content
+
+    if (!textToSend.trim()) {
+      try {
+        textToSend = await navigator.clipboard.readText()
+        if (!textToSend.trim()) {
+          setStatus({ type: 'error', message: 'Clipboard is empty' })
+          return
+        }
+        setContent(textToSend)
+      } catch {
+        setStatus({ type: 'error', message: 'Nothing to send — clipboard access denied' })
+        return
+      }
     }
 
     setLoading('send')
-    const result = await pushClipboard(content, passcodeSet ? passcodeInput : undefined)
+    const result = await pushClipboard(textToSend, passcodeSet ? passcodeInput : undefined)
     setLoading(null)
 
     if (result.ok) {
@@ -139,7 +150,12 @@ export function DashboardClient({ username, initialPasscodeSet }: DashboardClien
     if (result.ok) {
       if (result.content) {
         setContent(result.content)
-        setStatus({ type: 'success', message: 'Received from cloud' })
+        try {
+          await navigator.clipboard.writeText(result.content)
+          setStatus({ type: 'success', message: 'Received & copied to clipboard' })
+        } catch {
+          setStatus({ type: 'success', message: 'Received from cloud' })
+        }
       } else {
         setStatus({ type: 'error', message: 'No clipboard data found' })
       }
@@ -165,21 +181,21 @@ export function DashboardClient({ username, initialPasscodeSet }: DashboardClien
 
   const handleSetupPasscode = async () => {
     setSetupError('')
-    
+
     if (newPasscode.length < 4 || newPasscode.length > 32) {
       setSetupError('Passcode must be 4-32 characters')
       return
     }
-    
+
     if (newPasscode !== confirmPasscode) {
       setSetupError('Passcodes do not match')
       return
     }
-    
+
     setSetupLoading(true)
     const result = await setPasscodeAction(newPasscode)
     setSetupLoading(false)
-    
+
     if (result.ok && result.hash) {
       // Store hash locally (always stored for verification)
       localStorage.setItem(LOCAL_PASSCODE_HASH_KEY, result.hash)
@@ -271,12 +287,12 @@ export function DashboardClient({ username, initialPasscodeSet }: DashboardClien
               />
             </div>
           )}
-          
+
           {/* Indicator when using stored local passcode */}
           {passcodeSet && hasLocalPlainPasscode && !showPasscodeInput && (
             <div
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl border"
-              style={{ 
+              style={{
                 backgroundColor: 'rgba(74, 222, 128, 0.05)',
                 borderColor: 'var(--success)'
               }}
