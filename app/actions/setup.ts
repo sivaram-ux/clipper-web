@@ -25,7 +25,6 @@ export async function generateAndroidBundle(
 ): Promise<{ ok: boolean; bundle?: string; error?: string }> {
     try {
         if (!username || !passphrase) return { ok: false, error: 'Username and passphrase are required' }
-        if (passphrase.length < 6) return { ok: false, error: 'Passphrase must be at least 6 characters' }
         if (!UPSTASH_TOKEN) return { ok: false, error: 'Server misconfigured: missing UPSTASH_TOKEN' }
         if (!ENCRYPTION_KEY) return { ok: false, error: 'Server misconfigured: missing ENCRYPTION_KEY' }
 
