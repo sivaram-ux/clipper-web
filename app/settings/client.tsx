@@ -372,7 +372,6 @@ function AndroidBundleSection({ username }: { username: string }) {
     setError(''); setBundle('')
     if (!passphrase) { setError('Passphrase is required'); return }
     if (passphrase !== confirm) { setError('Passphrases do not match'); return }
-    if (passphrase.length < 6) { setError('Passphrase must be at least 6 characters'); return }
     setLoading(true)
     try {
       const res = await generateAndroidBundle(username, passphrase)
