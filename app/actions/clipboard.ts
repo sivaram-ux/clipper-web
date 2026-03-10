@@ -1,7 +1,9 @@
 'use server'
 
 import { getSession } from './auth'
+import { hasPasscode, verifyPasscode as verifyPasscodeAction } from './settings'
 import { encrypt, decrypt } from '@/lib/crypto'
+import { getPresignedDownloadUrl } from '@/lib/r2'
 
 const UPSTASH_URL = process.env.UPSTASH_URL || ''
 const UPSTASH_TOKEN = process.env.UPSTASH_TOKEN || ''
@@ -15,13 +17,10 @@ async function upstashGet(key: string): Promise<string | null> {
   return data.result ?? null
 }
 
-async function upstashSet(key: string, value: unknown): Promise<void> {
+async function upstashSet(key: string, value: unknown) {
   await fetch(`${UPSTASH_URL}/set/${key}`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${UPSTASH_TOKEN}`,
-      'Content-Type': 'application/json',
-    },
+    headers: { Authorization: `Bearer ${UPSTASH_TOKEN}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(value),
   })
 }
@@ -33,73 +32,94 @@ async function sha256(input: string): Promise<string> {
   return Buffer.from(hash).toString('base64')
 }
 
-// Single Upstash call — fetch both clipboard and passcode hash in parallel
 export async function pushClipboard(
   content: string,
   passcode?: string
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const session = await getSession()
-    if (!session || !session.real) return { ok: false, error: 'Not authenticated' }
-
+    if (!session?.real) return { ok: false, error: 'Not authenticated' }
     const { username } = session
 
-    // Fetch passcode hash and do encryption in parallel
     const [storedHash, encryptedContent] = await Promise.all([
       upstashGet(`passcode:${username}`),
       encrypt(content, ENCRYPTION_KEY),
     ])
 
-    // Verify passcode if one is set — no extra round trip
     if (storedHash) {
       if (!passcode) return { ok: false, error: 'Passcode required' }
-      const inputHash = await sha256(passcode)
-      if (inputHash !== storedHash) return { ok: false, error: 'Wrong passcode' }
+      if (await sha256(passcode) !== storedHash) return { ok: false, error: 'Wrong passcode' }
     }
 
     await upstashSet(`clipboard:${username}`, {
+      type: 'text',
       content: encryptedContent,
       device: 'web',
       ts: Date.now() / 1000,
     })
 
     return { ok: true }
-  } catch (error) {
-    console.error('Push error:', error)
+  } catch (e) {
+    console.error('Push error:', e)
     return { ok: false, error: 'Failed to push clipboard' }
   }
 }
 
-export async function pullClipboard(
-  passcode?: string
-): Promise<{ ok: boolean; content?: string; error?: string }> {
+export async function pullClipboard(passcode?: string): Promise<{
+  ok: boolean
+  type?: 'text' | 'file'
+  content?: string        // for text
+  downloadUrl?: string    // for file
+  filename?: string       // for file
+  mime?: string           // for file
+  size?: number           // for file
+  error?: string
+}> {
   try {
     const session = await getSession()
-    if (!session || !session.real) return { ok: false, error: 'Not authenticated' }
-
+    if (!session?.real) return { ok: false, error: 'Not authenticated' }
     const { username } = session
 
-    // Fetch clipboard and passcode hash in parallel — single round trip each
     const [clipboardRaw, storedHash] = await Promise.all([
       upstashGet(`clipboard:${username}`),
       upstashGet(`passcode:${username}`),
     ])
 
-    // Verify passcode if one is set — no extra round trip
     if (storedHash) {
       if (!passcode) return { ok: false, error: 'Passcode required' }
-      const inputHash = await sha256(passcode)
-      if (inputHash !== storedHash) return { ok: false, error: 'Wrong passcode' }
+      if (await sha256(passcode) !== storedHash) return { ok: false, error: 'Wrong passcode' }
     }
 
-    if (!clipboardRaw) return { ok: true, content: '' }
+    if (!clipboardRaw) return { ok: true, type: 'text', content: '' }
 
     const payload = JSON.parse(clipboardRaw)
-    const decryptedContent = await decrypt(payload.content, ENCRYPTION_KEY)
 
-    return { ok: true, content: decryptedContent }
-  } catch (error) {
-    console.error('Pull error:', error)
+    // ── Text ──────────────────────────────────────────────────────────────
+    if (!payload.type || payload.type === 'text') {
+      const content = await decrypt(payload.content, ENCRYPTION_KEY)
+      return { ok: true, type: 'text', content }
+    }
+
+    // ── File ──────────────────────────────────────────────────────────────
+    if (payload.type === 'file') {
+      const [r2key, filename] = await Promise.all([
+        decrypt(payload.r2key, ENCRYPTION_KEY),
+        decrypt(payload.filename, ENCRYPTION_KEY),
+      ])
+      const downloadUrl = await getPresignedDownloadUrl(r2key)
+      return {
+        ok: true,
+        type: 'file',
+        downloadUrl,
+        filename,
+        mime: payload.mime,
+        size: payload.size,
+      }
+    }
+
+    return { ok: false, error: 'Unknown payload type' }
+  } catch (e) {
+    console.error('Pull error:', e)
     return { ok: false, error: 'Failed to pull clipboard' }
   }
 }
