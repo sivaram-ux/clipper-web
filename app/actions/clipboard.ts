@@ -106,7 +106,7 @@ export async function pullClipboard(passcode?: string): Promise<{
         decrypt(payload.r2key, ENCRYPTION_KEY),
         decrypt(payload.filename, ENCRYPTION_KEY),
       ])
-      const downloadUrl = await getPresignedDownloadUrl(r2key)
+      const downloadUrl = await getPresignedDownloadUrl(r2key, filename)
       return {
         ok: true,
         type: 'file',

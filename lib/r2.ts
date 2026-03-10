@@ -18,8 +18,17 @@ export const r2 = new S3Client({
 export const BUCKET = process.env.R2_BUCKET_NAME!
 
 // Presigned GET URL — expires in 5 minutes
-export async function getPresignedDownloadUrl(r2key: string): Promise<string> {
-    return getSignedUrl(r2, new GetObjectCommand({ Bucket: BUCKET, Key: r2key }), { expiresIn: 300 })
+// ResponseContentDisposition bakes Content-Disposition: attachment into the URL
+// so browsers force a download even for cross-origin presigned URLs.
+export async function getPresignedDownloadUrl(r2key: string, filename?: string): Promise<string> {
+    const disposition = filename
+        ? `attachment; filename="${filename.replace(/"/g, '')}"`
+        : 'attachment'
+    return getSignedUrl(r2, new GetObjectCommand({
+        Bucket: BUCKET,
+        Key: r2key,
+        ResponseContentDisposition: disposition,
+    }), { expiresIn: 300 })
 }
 
 // Single-part presigned PUT — for files under 100MB
