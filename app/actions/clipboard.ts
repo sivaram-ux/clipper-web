@@ -1,9 +1,10 @@
 'use server'
 
 import { getSession } from './auth'
-import { hasPasscode, verifyPasscode as verifyPasscodeAction } from './settings'
+import { verifyPasscode as verifyPasscodeAction } from './settings'
 import { encrypt, decrypt } from '@/lib/crypto'
 import { getPresignedDownloadUrl } from '@/lib/r2'
+import { clipboardLimiter } from '@/lib/rate-limit'
 
 const UPSTASH_URL = process.env.UPSTASH_URL || ''
 const UPSTASH_TOKEN = process.env.UPSTASH_TOKEN || ''
@@ -25,13 +26,6 @@ async function upstashSet(key: string, value: unknown) {
   })
 }
 
-async function sha256(input: string): Promise<string> {
-  const { webcrypto } = await import('crypto')
-  const data = new TextEncoder().encode(input)
-  const hash = await webcrypto.subtle.digest('SHA-256', data)
-  return Buffer.from(hash).toString('base64')
-}
-
 export async function pushClipboard(
   content: string,
   passcode?: string
@@ -41,15 +35,17 @@ export async function pushClipboard(
     if (!session?.real) return { ok: false, error: 'Not authenticated' }
     const { username } = session
 
-    const [storedHash, encryptedContent] = await Promise.all([
-      upstashGet(`passcode:${username}`),
-      encrypt(content, ENCRYPTION_KEY),
-    ])
+    const { success } = await clipboardLimiter.limit(username)
+    if (!success) return { ok: false, error: 'Too many requests — try again shortly' }
 
+    // Check if passcode is required
+    const storedHash = await upstashGet(`passcode:${username}`)
     if (storedHash) {
       if (!passcode) return { ok: false, error: 'Passcode required' }
-      if (await sha256(passcode) !== storedHash) return { ok: false, error: 'Wrong passcode' }
+      if (!(await verifyPasscodeAction(passcode))) return { ok: false, error: 'Wrong passcode' }
     }
+
+    const encryptedContent = await encrypt(content, ENCRYPTION_KEY)
 
     await upstashSet(`clipboard:${username}`, {
       type: 'text',
@@ -80,6 +76,9 @@ export async function pullClipboard(passcode?: string): Promise<{
     if (!session?.real) return { ok: false, error: 'Not authenticated' }
     const { username } = session
 
+    const { success } = await clipboardLimiter.limit(username)
+    if (!success) return { ok: false, error: 'Too many requests — try again shortly' }
+
     const [clipboardRaw, storedHash] = await Promise.all([
       upstashGet(`clipboard:${username}`),
       upstashGet(`passcode:${username}`),
@@ -87,7 +86,7 @@ export async function pullClipboard(passcode?: string): Promise<{
 
     if (storedHash) {
       if (!passcode) return { ok: false, error: 'Passcode required' }
-      if (await sha256(passcode) !== storedHash) return { ok: false, error: 'Wrong passcode' }
+      if (!(await verifyPasscodeAction(passcode))) return { ok: false, error: 'Wrong passcode' }
     }
 
     if (!clipboardRaw) return { ok: true, type: 'text', content: '' }

@@ -3,6 +3,7 @@
 import { cookies } from 'next/headers'
 import { getFirebaseAdmin } from '@/lib/firebase-admin'
 import { SignJWT, jwtVerify } from 'jose'
+import { authLimiter, getClientIp } from '@/lib/rate-limit'
 
 const ALLOWED_EMAILS = process.env.ALLOWED_EMAILS?.split(',').map(e => e.trim().toLowerCase()) || []
 const MASTER_SECRET = process.env.MASTER_SECRET || ''
@@ -13,6 +14,10 @@ function getMasterSecretKey() {
 
 export async function verifyAndLogin(idToken: string): Promise<{ status: string }> {
   try {
+    const ip = await getClientIp()
+    const { success } = await authLimiter.limit(ip)
+    if (!success) return { status: 'success' } // silent rate limit — stealth
+
     const { adminAuth } = getFirebaseAdmin()
     
     // Verify the Firebase ID token

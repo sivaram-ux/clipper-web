@@ -5,11 +5,11 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { auth, signOut } from '@/lib/firebase'
 import { logout } from '@/app/actions/auth'
-import { setPasscode, changePasscode, getPasscodeHash } from '@/app/actions/settings'
+import { setPasscode, changePasscode } from '@/app/actions/settings'
 import { generateAndroidBundle } from '@/app/actions/setup'
 import { ArrowLeft, CheckCircle, Loader2, LogOut, Shield, User, HardDrive, Trash2 } from 'lucide-react'
 
-const LOCAL_PASSCODE_HASH_KEY = 'clipper_passcode_hash'
+const LOCAL_PASSCODE_SET_KEY = 'clipper_passcode_set'
 const getPlainPasscodeKey = (username: string) => `plain-passcode-${username}`
 
 interface SettingsClientProps {
@@ -30,7 +30,6 @@ export function SettingsClient({ username, email, passcodeSet: initialPasscodeSe
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
-  const [hasLocalHashStored, setHasLocalHashStored] = useState(false)
   const router = useRouter()
 
   const [localStorageView, setLocalStorageView] = useState<LocalStorageView>('default')
@@ -39,21 +38,12 @@ export function SettingsClient({ username, email, passcodeSet: initialPasscodeSe
   const [removePasscodeInput, setRemovePasscodeInput] = useState('')
 
   useEffect(() => {
-    const storedHash = localStorage.getItem(LOCAL_PASSCODE_HASH_KEY)
-    setHasLocalHashStored(!!storedHash)
+    if (!localStorage.getItem(LOCAL_PASSCODE_SET_KEY) && initialPasscodeSet) {
+      localStorage.setItem(LOCAL_PASSCODE_SET_KEY, 'true')
+    }
     const plainPasscodeKey = getPlainPasscodeKey(username)
     const storedPlainPasscode = localStorage.getItem(plainPasscodeKey)
     setHasLocalPlainPasscode(!!storedPlainPasscode)
-    const syncLocalHash = async () => {
-      if (!storedHash && initialPasscodeSet) {
-        const result = await getPasscodeHash()
-        if (result.ok && result.hash) {
-          localStorage.setItem(LOCAL_PASSCODE_HASH_KEY, result.hash)
-          setHasLocalHashStored(true)
-        }
-      }
-    }
-    syncLocalHash()
   }, [initialPasscodeSet, username])
 
   const resetForm = () => {
@@ -69,9 +59,8 @@ export function SettingsClient({ username, email, passcodeSet: initialPasscodeSe
     setLoading(true)
     const result = await setPasscode(newPasscode)
     setLoading(false)
-    if (result.ok && result.hash) {
-      localStorage.setItem(LOCAL_PASSCODE_HASH_KEY, result.hash)
-      setHasLocalHashStored(true)
+    if (result.ok) {
+      localStorage.setItem(LOCAL_PASSCODE_SET_KEY, 'true')
       setPasscodeSetState(true)
       setPasscodeView('default')
       setSuccess('Passcode set successfully.')
@@ -86,8 +75,7 @@ export function SettingsClient({ username, email, passcodeSet: initialPasscodeSe
     setLoading(true)
     const result = await changePasscode(oldPasscode, newPasscode)
     setLoading(false)
-    if (result.ok && result.hash) {
-      localStorage.setItem(LOCAL_PASSCODE_HASH_KEY, result.hash)
+    if (result.ok) {
       const plainPasscodeKey = getPlainPasscodeKey(username)
       if (localStorage.getItem(plainPasscodeKey)) localStorage.setItem(plainPasscodeKey, newPasscode)
       setPasscodeView('default')
@@ -180,14 +168,9 @@ export function SettingsClient({ username, email, passcodeSet: initialPasscodeSe
             <>
               {passcodeSet ? (
                 <>
-                  <div className="flex items-center gap-2 mb-2" style={{ color: 'var(--success)' }}>
+                  <div className="flex items-center gap-2 mb-4" style={{ color: 'var(--success)' }}>
                     <Shield className="w-5 h-5" /><span className="font-medium">Passcode is set</span>
                   </div>
-                  {hasLocalHashStored && (
-                    <div className="flex items-center gap-2 mb-4" style={{ color: 'var(--muted)' }}>
-                      <HardDrive className="w-4 h-4" /><span className="text-sm">Hash stored locally for verification</span>
-                    </div>
-                  )}
                   <button onClick={() => { resetForm(); setPasscodeView('change') }}
                     className="w-full py-2.5 px-4 rounded-xl text-sm font-medium border transition-colors hover:bg-[var(--surface)] cursor-pointer"
                     style={{ borderColor: 'var(--border)', color: 'var(--primary)' }}>

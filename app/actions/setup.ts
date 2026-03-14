@@ -6,6 +6,8 @@
 
 import argon2 from 'argon2'
 import { randomBytes, createCipheriv } from 'crypto'
+import { getSession } from './auth'
+import { bundleLimiter } from '@/lib/rate-limit'
 
 const UPSTASH_TOKEN = process.env.UPSTASH_TOKEN || ''
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || ''
@@ -24,6 +26,12 @@ export async function generateAndroidBundle(
     passphrase: string
 ): Promise<{ ok: boolean; bundle?: string; error?: string }> {
     try {
+        const session = await getSession()
+        if (!session || !session.real) return { ok: false, error: 'Not authenticated' }
+
+        const { success } = await bundleLimiter.limit(session.username)
+        if (!success) return { ok: false, error: 'Too many attempts — try again shortly' }
+
         if (!username || !passphrase) return { ok: false, error: 'Username and passphrase are required' }
         if (!UPSTASH_TOKEN) return { ok: false, error: 'Server misconfigured: missing UPSTASH_TOKEN' }
         if (!ENCRYPTION_KEY) return { ok: false, error: 'Server misconfigured: missing ENCRYPTION_KEY' }

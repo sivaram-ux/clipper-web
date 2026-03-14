@@ -6,14 +6,14 @@ import Link from 'next/link'
 import { auth, signOut } from '@/lib/firebase'
 import { logout } from '@/app/actions/auth'
 import { pushClipboard, pullClipboard } from '@/app/actions/clipboard'
-import { setPasscode as setPasscodeAction, getPasscodeHash } from '@/app/actions/settings'
+import { setPasscode as setPasscodeAction } from '@/app/actions/settings'
 import {
   Clipboard, Settings, LogOut, ArrowUpRight, ArrowDownLeft,
   Loader2, CheckCircle, XCircle, Shield, Lock,
   Paperclip, Download, FileText, X
 } from 'lucide-react'
 
-const LOCAL_PASSCODE_HASH_KEY = 'clipper_passcode_hash'
+const LOCAL_PASSCODE_SET_KEY = 'clipper_passcode_set'
 const getPlainPasscodeKey = (username: string) => `plain-passcode-${username}`
 const MULTIPART_THRESHOLD = 100 * 1024 * 1024 // 100MB
 const CHUNK_SIZE = 10 * 1024 * 1024 // 10MB
@@ -58,14 +58,11 @@ export function DashboardClient({ username, initialPasscodeSet }: DashboardClien
 
   useEffect(() => {
     const checkPasscode = async () => {
-      const localHash = localStorage.getItem(LOCAL_PASSCODE_HASH_KEY)
-      if (localHash) { setPasscodeSet(true); setInitialCheckDone(true); return }
+      const localFlag = localStorage.getItem(LOCAL_PASSCODE_SET_KEY)
+      if (localFlag === 'true') { setPasscodeSet(true); setInitialCheckDone(true); return }
       if (initialPasscodeSet) {
-        const result = await getPasscodeHash()
-        if (result.ok && result.hash) {
-          localStorage.setItem(LOCAL_PASSCODE_HASH_KEY, result.hash)
-          setPasscodeSet(true)
-        }
+        localStorage.setItem(LOCAL_PASSCODE_SET_KEY, 'true')
+        setPasscodeSet(true)
         setInitialCheckDone(true)
         return
       }
@@ -90,14 +87,10 @@ export function DashboardClient({ username, initialPasscodeSet }: DashboardClien
 
   // ── Passcode error helper ──────────────────────────────────────────────────
   const handlePasscodeError = async () => {
-    const hashResult = await getPasscodeHash()
-    if (hashResult.ok && hashResult.hash) {
-      localStorage.setItem(LOCAL_PASSCODE_HASH_KEY, hashResult.hash)
-      localStorage.removeItem(getPlainPasscodeKey(username))
-      setPasscodeInput('')
-      setHasLocalPlainPasscode(false)
-      setShowPasscodeInput(true)
-    }
+    localStorage.removeItem(getPlainPasscodeKey(username))
+    setPasscodeInput('')
+    setHasLocalPlainPasscode(false)
+    setShowPasscodeInput(true)
     setStatus({ type: 'error', message: 'Wrong passcode — may have changed on another device' })
   }
 
@@ -271,8 +264,8 @@ export function DashboardClient({ username, initialPasscodeSet }: DashboardClien
     setSetupLoading(true)
     const result = await setPasscodeAction(newPasscode)
     setSetupLoading(false)
-    if (result.ok && result.hash) {
-      localStorage.setItem(LOCAL_PASSCODE_HASH_KEY, result.hash)
+    if (result.ok) {
+      localStorage.setItem(LOCAL_PASSCODE_SET_KEY, 'true')
       setPasscodeInput(newPasscode)
       setHasLocalPlainPasscode(false)
       setShowPasscodeInput(true)

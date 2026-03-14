@@ -9,6 +9,7 @@ import {
     completeMultipartUpload, abortMultipartUpload,
 } from '@/lib/r2'
 import { randomUUID } from 'crypto'
+import { fileLimiter } from '@/lib/rate-limit'
 
 const UPSTASH_URL = process.env.UPSTASH_URL || ''
 const UPSTASH_TOKEN = process.env.UPSTASH_TOKEN || ''
@@ -46,6 +47,9 @@ export async function getUploadUrl(
         const session = await getSession()
         if (!session?.real) return { ok: false, error: 'Not authenticated' }
 
+        const { success } = await fileLimiter.limit(session.username)
+        if (!success) return { ok: false, error: 'Too many uploads — try again shortly' }
+
         const r2key = `${session.username}/${randomUUID()}/${filename}`
         const url = await getPresignedUploadUrl(r2key, mime)
         return { ok: true, url, r2key }
@@ -63,6 +67,9 @@ export async function initMultipartUpload(
     try {
         const session = await getSession()
         if (!session?.real) return { ok: false, error: 'Not authenticated' }
+
+        const { success } = await fileLimiter.limit(session.username)
+        if (!success) return { ok: false, error: 'Too many uploads — try again shortly' }
 
         const r2key = `${session.username}/${randomUUID()}/${filename}`
         const uploadId = await createMultipartUpload(r2key, mime)
